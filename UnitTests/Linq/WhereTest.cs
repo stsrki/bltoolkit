@@ -1,8 +1,10 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Data;
 using System.Linq;
 
 using BLToolkit.Data.DataProvider;
+using BLToolkit.DataAccess;
 using BLToolkit.Mapping;
 
 using NUnit.Framework;
@@ -654,14 +656,19 @@ namespace Data.Linq
 		[Test]
 		public void CheckCondition2()
 		{
+			var p1 = 1;
+			var p2 = 2;
+			var p3 = 3;
+			var p4 = 4;
+
 			var expected =
 				from p in Parent
-				where p.ParentID == 1 && p.Value1 == 1 || p.ParentID == 2 && (p.ParentID != 3 || p.ParentID == 4) && p.Value1.HasValue
+				where p.ParentID == p1 && p.Value1 == p1 || p.ParentID == p2 && (p.ParentID != p3 || p.ParentID == p4) && p.Value1.HasValue
 				select p;
 
 			ForEachProvider(db => AreEqual(expected,
 				from p in db.Parent
-				where p.ParentID == 1 && p.Value1 == 1 || p.ParentID == 2 && (p.ParentID != 3 || p.ParentID == 4) && p.Value1.HasValue
+				where p.ParentID == p1 && p.Value1 == p1 || p.ParentID == p2 && (p.ParentID != p3 || p.ParentID == p4) && p.Value1.HasValue
 				select p));
 		}
 
@@ -978,6 +985,56 @@ namespace Data.Linq
   
  				AreEqual(qry12, qry22); 
  			} 
- 		} 
+ 		}
+
+		public enum TestEnum
+		{
+			First,
+			Second,
+			Third
+		}
+
+		[TableName("LinqDataTypes")]
+		public class Table
+		{
+			[PrimaryKey]
+			public int       ID;
+			public decimal   MoneyValue;
+			[DbType(DbType.DateTime)]
+			public DateTime? DateTimeValue;
+			[DbType(DbType.DateTime)]
+			public DateTime? DateTimeValue2;
+			public bool?     BoolValue;
+			public Guid?     GuidValue;
+			public short?    SmallIntValue;
+			[MapField("IntValue")]
+			public TestEnum? EnumValue;
+			public long?     BigIntValue;
+		}
+
+
+		[Test]
+		public void NullableEnum_344()
+		{
+			ForEachProvider(db =>
+			{
+				var t = db.GetTable<Table>();
+				t.Where(_ => _.ID > 1000).Delete();
+
+				t.Insert(() => new Table { ID = 1003, MoneyValue = 0m, DateTimeValue = null,         BoolValue = true,  GuidValue = new Guid("ef129165-6ffe-4df9-bb6b-bb16e413c883"), SmallIntValue =  null, EnumValue = null });
+				t.Insert(() => new Table { ID = 1004, MoneyValue = 0m, DateTimeValue = DateTime.Now, BoolValue = false, GuidValue = null,                                             SmallIntValue =  2,    EnumValue = TestEnum.Second });
+
+				var types = new[] { TestEnum.Second, TestEnum.First };
+
+				var data = t
+				  .Where(i => types.Contains(i.EnumValue ?? TestEnum.First))
+				  .ToList();
+
+				Assert.That(data.Count >= 2);
+
+				t.Where(_ => _.ID > 1000).Delete();
+
+			});
+		}
 	}
 }

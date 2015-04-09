@@ -17,10 +17,12 @@ namespace BLToolkit.Data.Sql.SqlProvider
 
 	public abstract class BasicSqlProvider : ISqlProvider
 	{
+
 		#region Init
 
-		public SqlQuery SqlQuery { get; set; }
-		public int      Indent   { get; set; }
+		public bool     UseQueryText { get; set; }
+		public SqlQuery SqlQuery     { get; set; }
+		public int      Indent       { get; set; }
 
 		private int _nextNesting = 1;
 		private int _nesting;
@@ -92,7 +94,8 @@ namespace BLToolkit.Data.Sql.SqlProvider
 						if (union.IsAll) sb.Append(" ALL");
 						sb.AppendLine();
 
-						CreateSqlProvider().BuildSql(commandNumber, union.SqlQuery, sb, indent, nesting, skipAlias);
+						ISqlProvider sqlProvider = CreateSqlProvider();
+						sqlProvider.BuildSql(commandNumber, union.SqlQuery, sb, indent, nesting, skipAlias);
 					}
 				}
 			}
@@ -120,7 +123,8 @@ namespace BLToolkit.Data.Sql.SqlProvider
 			if (!IsTakeSupported && sqlQuery.Select.TakeValue != null)
 				throw new SqlException("Take for subqueries is not supported by the '{0}' provider.", Name);
 
-			return CreateSqlProvider().BuildSql(0, sqlQuery, sb, indent, nesting, skipAlias);
+			ISqlProvider sqlProvider = CreateSqlProvider();
+			return sqlProvider.BuildSql(0, sqlQuery, sb, indent, nesting, skipAlias);
 		}
 
 		protected abstract ISqlProvider CreateSqlProvider();
@@ -1519,7 +1523,7 @@ namespace BLToolkit.Data.Sql.SqlProvider
 					{
 						var parm = (SqlParameter)expr;
 
-						if (parm.IsQueryParameter)
+						if (!BuildAsValue(parm))
 						{
 							var name = Convert(parm.Name, ConvertType.NameToQueryParameter);
 							sb.Append(name);
@@ -1543,6 +1547,11 @@ namespace BLToolkit.Data.Sql.SqlProvider
 			}
 
 			return sb;
+		}
+
+		public virtual bool BuildAsValue(SqlParameter parm)
+		{
+			return !parm.IsQueryParameter && !(parm.Value is System.Data.Linq.Binary);
 		}
 
 		protected void BuildExpression(StringBuilder sb, int parentPrecedence, ISqlExpression expr, string alias, ref bool addAlias)
@@ -1658,17 +1667,14 @@ namespace BLToolkit.Data.Sql.SqlProvider
 
 				if (type.IsEnum)
 				{
-					value = Map.EnumToValue(value);
+					var attrs = type.GetCustomAttributes(typeof(SqlEnumAttribute), true);
+					value = Map.EnumToValue(value, attrs.Length == 0);
 
 					if (value != null && !value.GetType().IsEnum)
 						BuildValue(sb, value);
 					else if (value != null)
-					{
-						var attrs = value.GetType().GetCustomAttributes(typeof(SqlEnumAttribute), true);
-
-						value = Map.EnumToValue(value, attrs.Length == 0);
 						sb.Append(value);
-					}
+
 				}
 				else
 					sb.Append(value);

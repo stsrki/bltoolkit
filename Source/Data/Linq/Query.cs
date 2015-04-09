@@ -374,33 +374,46 @@ namespace BLToolkit.Data.Linq
 			}
 		}
 
-		object SetCommand(IDataContext dataContext, Expression expr, object[] parameters, int idx)
+		private object SetCommand(IDataContext dataContext, Expression expr, object[] parameters, int idx)
 		{
 			lock (this)
 			{
-				SetParameters(expr, parameters, idx);
+				bool useQueryText = dataContext.InlineParameters;
+				SetParameters(expr, parameters, idx, useQueryText);
 				return dataContext.SetQuery(Queries[idx]);
 			}
 		}
 
-		void SetParameters(Expression expr, object[] parameters, int idx)
+		private void SetParameters(Expression expr, object[] parameters, int idx, bool useQueryText)
 		{
+			Query<T>.QueryInfo queryInfo = this.Queries[idx];
+			if (queryInfo.UseQueryText != useQueryText)
+			{
+				queryInfo.Context = null;
+				queryInfo.UseQueryText = useQueryText;
+			}
+
 			foreach (var p in Queries[idx].Parameters)
 			{
 				var value = p.Accessor(expr, parameters);
 
-				if (value is IEnumerable && !(value is XmlDocument))
+				if (value is IEnumerable
+#if !SILVERLIGHT
+				    && !(value is XmlDocument)
+#endif
+
+					)
 				{
-					var type  = value.GetType();
+					var type = value.GetType();
 					var etype = TypeHelper.GetElementType(type);
 
-					if (etype == null || etype == typeof(object) ||
-						etype.IsEnum ||
-						(TypeHelper.IsNullableType(etype) && etype.GetGenericArguments()[0].IsEnum))
+					if (etype == null || etype == typeof (object) ||
+					    etype.IsEnum ||
+					    (TypeHelper.IsNullableType(etype) && etype.GetGenericArguments()[0].IsEnum))
 					{
 						var values = new List<object>();
 
-						foreach (var v in (IEnumerable)value)
+						foreach (var v in (IEnumerable) value)
 						{
 							values.Add(v);
 							// Enum mapping done by parameter itself
@@ -413,6 +426,10 @@ namespace BLToolkit.Data.Linq
 					}
 				}
 
+				if (useQueryText && queryInfo.Context != null && !object.Equals(p.SqlParameter.Value, value))
+				{
+					queryInfo.Context = null;
+				}
 				p.SqlParameter.Value = value;
 			}
 		}
@@ -447,8 +464,9 @@ namespace BLToolkit.Data.Linq
 				SqlQuery = new SqlQuery();
 			}
 
-			public SqlQuery SqlQuery { get; set; }
-			public object   Context  { get; set; }
+			public SqlQuery SqlQuery     { get; set; }
+			public object   Context      { get; set; }
+			public bool     UseQueryText { get; set; }
 
 			public SqlParameter[] GetParameters()
 			{
@@ -547,7 +565,7 @@ namespace BLToolkit.Data.Linq
 			{
 				Expression   = null,
 				Accessor     = mapper.Compile(),
-				SqlParameter = new SqlParameter(field.SystemType, field.Name.Replace('.', '_'), null, dataContext.MappingSchema)
+				SqlParameter = new SqlParameter(field.SystemType, field.Name.Replace('.', '_'), null, dataContext.MappingSchema, !dataContext.InlineParameters)
 			};
 
 			if (TypeHelper.IsEnumOrNullableEnum(field.SystemType))
